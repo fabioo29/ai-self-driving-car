@@ -33,7 +33,7 @@ def get_assets(folder, files):
 
     assets = []
     for file in sorted(os.listdir(assets_path)):
-        if file.startswith(files):
+        if files in file:
             assets.append(pygame.image.load(os.path.join(assets_path, file)))
     return assets
 
