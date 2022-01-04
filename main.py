@@ -7,6 +7,12 @@
 
 # TODO:
 # - add transparency to car when it hits the wall
+# - add sensors to best fitness car
+
+# self-driving track 1: 2nd Gen > [-0.21, -0.92, 0.97, 0.49, -0.9, 0.2, 0.62, -0.73, 0.49]
+# self-driving track 2: 2nd Gen > [0.42, -0.11, 0.64, -0.21, -0.2, -0.11, 0.45, -0.85, -0.09]
+# self-driving track 3: Not done yet
+# self-driving track 4: not done yet
 
 import os
 import sys
@@ -84,8 +90,19 @@ class Population:
 
     def crossover(self):
         """Process of producing offspring from two parents."""
+
+        # Going through all the top parents to create childs method.
+        # for i in range(self.selection, self.population_size, 2):
+        #     p1, p2 = i-self.selection, i+1-self.selection
+        #     parent1 = self.cars[p1]
+        #     parent2 = self.cars[p2]
+        #     w1, w2 = parent1.crossover(parent2)
+        #     self.cars[i].chromosome = w1
+        #     self.cars[i + 1].chromosome = w2
+
+        # Creating childs using only two top parents. (Performing better)
         for i in range(self.selection, self.population_size, 2):
-            p1, p2 = i-self.selection, i+1-self.selection
+            p1, p2 = 0, 1
             parent1 = self.cars[p1]
             parent2 = self.cars[p2]
             w1, w2 = parent1.crossover(parent2)
@@ -158,7 +175,7 @@ class Sensor:
         self.color = (255, 165, 0)
 
     def __call__(self):
-        return round(self.curr_distance, 2)
+        return round(min(self.max_dist, self.curr_distance), 2)
 
     def update(self):
         """update the sensor position"""
@@ -175,13 +192,11 @@ class Sensor:
         y1, y2 = self.y, self.y + 1*sin(radians(self.angle))
         angle = self.angle
 
-        for _ in range(self.max_dist):
+        while True:
             if self.border_mask.get_at((int(x2), int(y2))):
                 return get_distance_from_points(x1, y1, x2, y2)
             x2 += cos(radians(angle))  # add one pixel more to x2
             y2 += sin(radians(angle))  # add one pixel more to y2
-        else:
-            return self.max_dist
 
     def draw(self):
         pygame.draw.line(
@@ -275,10 +290,10 @@ class CleanerCar(Car):
         self.controller = self.get_controler()
         self.cleaner_line = None
         self.sensors = [
-            Sensor(self, self.track.border_mask, degree=-50, max_dist=90),
-            Sensor(self, self.track.border_mask, degree=-25, max_dist=90),
-            Sensor(self, self.track.border_mask, degree=25, max_dist=90),
-            Sensor(self, self.track.border_mask, degree=55, max_dist=90),
+            Sensor(self, self.track.border_mask, degree=-50),
+            Sensor(self, self.track.border_mask, degree=-25),
+            Sensor(self, self.track.border_mask, degree=25),
+            Sensor(self, self.track.border_mask, degree=55),
             Sensor(self, self.track.border_mask, degree=-90),  # cleaner left
             Sensor(self, self.track.border_mask, degree=90),  # cleaner right
         ]
@@ -288,10 +303,10 @@ class CleanerCar(Car):
         obj1, obj2 = self.sensors[-2:]
         self.cleaner_line = pygame.draw.line(
             WIN, (255, 0, 0),
-            (obj1.x + cos(radians(obj1.angle)) * obj1.curr_distance,
-             obj1.y + sin(radians(obj1.angle)) * obj1.curr_distance),
-            (obj2.x + cos(radians(obj2.angle)) * obj2.curr_distance,
-             obj2.y + sin(radians(obj2.angle)) * obj2.curr_distance), 4
+            (obj1.x + cos(radians(obj1.angle)) * min(obj1.curr_distance, self.sensors[0].max_dist),
+             obj1.y + sin(radians(obj1.angle)) * min(obj1.curr_distance, self.sensors[0].max_dist)),
+            (obj2.x + cos(radians(obj2.angle)) * min(obj2.curr_distance, self.sensors[0].max_dist),
+             obj2.y + sin(radians(obj2.angle)) * min(obj2.curr_distance, self.sensors[0].max_dist)), 4
         )
 
     def get_controler(self):
@@ -331,8 +346,8 @@ class CleanerCar(Car):
         offset = (int(self.x - x), int(self.y - y))
         poi = mask.overlap(car_mask, offset)
 
-        # if PIDCar crashed stop the simulation
         if poi:
+            raise Exception("PIDCar crashed!")
             sys.exit()
         return 0
 
@@ -385,7 +400,7 @@ class PopulationCar(Car):
         # if PopulationCar crashed stop it
         if poi:
             if finish and poi[0] == 9:
-                self.fitness += 50  # add 20 points if car reached the finish line
+                self.fitness += 100  # add 100 points if car reached the finish line
             elif not finish and self.velocity > 0:
                 self.velocity = 0
                 return 1
@@ -410,11 +425,9 @@ class PopulationCar(Car):
         randomIndex = random.randint(0, len(self.chromosome) - 1)
         randomValue = random.uniform(-1, 1)
         self.chromosome[randomIndex] += randomValue
-        self.chromosome[randomIndex] = max(-1,
-                                           self.chromosome[randomIndex])
+        self.chromosome[randomIndex] = max(-1, self.chromosome[randomIndex])
         self.chromosome[randomIndex] = min(1, self.chromosome[randomIndex])
-        self.chromosome[randomIndex] = round(
-            self.chromosome[randomIndex], 2)
+        self.chromosome[randomIndex] = round(self.chromosome[randomIndex], 2)
 
     def restart(self, track):
         """Get the car ready for a new generation."""
@@ -431,21 +444,21 @@ class PopulationCar(Car):
 
         # normalize data from sensors
         sensors_data = [
-            sensor.curr_distance / math.sqrt(HEIGHT**2 + WIDTH**2) for sensor in self.sensors]
+            sensor()/sensor.max_dist for sensor in self.sensors]
 
-        eq1 = self.chromosome[0]*sensors_data[0]
-        eq2 = self.chromosome[1]*sensors_data[1]
-        eq3 = self.chromosome[2]*sensors_data[2]
-        eq4 = self.chromosome[3]*sensors_data[0]*sensors_data[1]
-        eq5 = self.chromosome[4]*sensors_data[0]*sensors_data[2]
-        eq5 = self.chromosome[5]*sensors_data[1]*sensors_data[2]
-        eq6 = self.chromosome[6]*sensors_data[0]**sensors_data[0]
-        eq7 = self.chromosome[7]*sensors_data[1]**sensors_data[1]
-        eq8 = self.chromosome[8]*sensors_data[2]**sensors_data[2]
-        eq = eq1 + eq2 + eq3 + eq4 + eq5 + eq6 + eq7 + eq8
+        eq = 0
+        eq += self.chromosome[0]*sensors_data[0]
+        eq += self.chromosome[1]*sensors_data[1]
+        eq += self.chromosome[2]*sensors_data[2]
+        eq += self.chromosome[3]*sensors_data[0]*sensors_data[1]
+        eq += self.chromosome[4]*sensors_data[0]*sensors_data[2]
+        eq += self.chromosome[5]*sensors_data[1]*sensors_data[2]
+        eq += self.chromosome[6]*sensors_data[0]**sensors_data[0]
+        eq += self.chromosome[7]*sensors_data[1]**sensors_data[1]
+        eq += self.chromosome[8]*sensors_data[2]**sensors_data[2]
+        eq = eq/len(self.chromosome)
 
-        # result to be between -x and x degree
-        return round(eq / 8 * 1 * self.max_steering, 2)
+        return round(eq, 2) * (self.max_steering*2)
 
     def update(self):
         """update car data"""
@@ -507,7 +520,7 @@ def parse_args() -> Namespace:
         '-t --track',
         dest='track',
         type=int,
-        default=1,
+        default=2,
         help=f"Racing track to use. Default: None = Random track",
     )
 
@@ -604,13 +617,14 @@ def main() -> None:
         pygame.display.update()
 
         # keep printing in the same line refresehing the screen
-        log = f'Gen: {Agents.generation} ' + \
-            f'Crashed: {Agents.crashed}/{pop_size} ' + \
+        log = f'Gen: {Agents.generation:03} ' + \
+            f'Crashed: {Agents.crashed:03}/{pop_size:03} ' + \
             f'Track: {Agents.track.track_id+1} ' + \
             f'Best Chromosome: {Agents.cars[0].chromosome} ' + \
             f'Fitness: {Agents.cars[0].fitness} ' + ' '*5
         print(log, end='\r')
 
+        Agents.cars.sort(key=lambda x: x.fitness, reverse=True)
         restart(log, Agents, myCar, PIDCar) if Agents.crashed == pop_size else None
 
 

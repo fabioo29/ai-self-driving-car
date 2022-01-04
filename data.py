@@ -28,9 +28,9 @@ CLEANER = [scale(car) for car in CLEANER][0]
 WIDTH = TRACKS[0].get_width()
 HEIGHT = TRACKS[0].get_height()
 
-MAX_DIST = int(get_distance_from_points(*([0, 0]+[WIDTH, HEIGHT])))
+MAX_DIST = 90
 
 # finish line mask to increase car fitness on cross
 FINISH_LINE = get_assets(*('assets', 'finish'))[0]
 FL_MASK = get_mask([FINISH_LINE]+[])[0]
-FL_POS = (133, 15)
+FL_POS = (145, 15)
