@@ -1,22 +1,4 @@
-# TODO
-# Add info below the track (increase window dimensions)
-# red circles representing inputs (darker = small distance);
-# red circles representing output (darker = small distance);
-# Generation level, crashed (23/100), best fitness, track number;
-# print to the console the weights after the generation ends.
-
-# TODO:
-# - add transparency to car when it hits the wall
-# - add sensors to best fitness car
-
-# self-driving track 1: 2nd Gen > [-0.21, -0.92, 0.97, 0.49, -0.9, 0.2, 0.62, -0.73, 0.49]
-# self-driving track 2: 2nd Gen > [0.42, -0.11, 0.64, -0.21, -0.2, -0.11, 0.45, -0.85, -0.09]
-# self-driving track 3: Not done yet
-# self-driving track 4: not done yet
-
-import os
 import sys
-import math
 import pygame
 import random
 import argparse
@@ -25,28 +7,26 @@ from math import sin, cos, radians
 from argparse import Namespace
 from simple_pid import PID
 
-from data import WIDTH, HEIGHT, GRASS
-from data import START_COORDS, START_ALIGN
-from data import TRACKS, BORDERS, BORDERS_MASK, FL_POS
-from data import FL_MASK, CARS, FINISH_LINE, MAX_DIST, CLEANER
-
-from utils import scale, rotate, blit_rotate, get_distance_from_points
-
-WIN = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption('Genetic algorithm self-driving car simulation')
+from data import WIN, WIDTH, HEIGHT, GRASS, MAX_SPEED, FONT
+from data import START_COORDS, START_ALIGN, FL_POS, MAX_DIST
+from data import TRACKS, BORDERS, BORDERS_MASK, MAX_FITNESS, CLEANER
+from data import FL_MASK, CARS, FINISH_LINE, BEST_CAR_CHROMOSOME, MAX_STEERING
+from utils import blit_rotate, get_distance_from_points
 
 
 class Population:
     """class to create a population of car objects"""
 
-    def __init__(self, population_size, track_id: int = None):
+    def __init__(self, population_size, track: int = None):
         self.population_size = population_size
-        self.track = Track(track_id)
+        self.track = track
         self.cars = self.populate_generation()
         self.start_time = pygame.time.get_ticks()
         self.generation = 1
         self.selection = 0
         self.crashed = 0
+        self.old_fitness = 0
+        self.overfitting = 0
 
     def __call__(self) -> None:
         """Evolve into a new generation and keep going."""
@@ -91,20 +71,9 @@ class Population:
     def crossover(self):
         """Process of producing offspring from two parents."""
 
-        # Going through all the top parents to create childs method.
-        # for i in range(self.selection, self.population_size, 2):
-        #     p1, p2 = i-self.selection, i+1-self.selection
-        #     parent1 = self.cars[p1]
-        #     parent2 = self.cars[p2]
-        #     w1, w2 = parent1.crossover(parent2)
-        #     self.cars[i].chromosome = w1
-        #     self.cars[i + 1].chromosome = w2
-
-        # Creating childs using only two top parents. (Performing better)
         for i in range(self.selection, self.population_size, 2):
-            p1, p2 = 0, 1
-            parent1 = self.cars[p1]
-            parent2 = self.cars[p2]
+            parent1 = self.cars[0]
+            parent2 = self.cars[1]
             w1, w2 = parent1.crossover(parent2)
             self.cars[i].chromosome = w1
             self.cars[i + 1].chromosome = w2
@@ -144,6 +113,8 @@ class Track:
         if track_id is not None:
             return track_id
         else:
+            if track_id in range(1, len(TRACKS)):
+                return track_id
             return random.randint(0, len(TRACKS) - 1)
 
     def draw(self):
@@ -218,8 +189,8 @@ class Car:
         self.width = self.image.get_width()
         self.height = self.image.get_height()
         self.angle = START_ALIGN
-        self.max_steering = parser.max_steering
-        self.velocity = parser.max_speed
+        self.max_steering = MAX_STEERING
+        self.velocity = MAX_SPEED
 
     def update(self):
         """update car data"""
@@ -326,7 +297,7 @@ class CleanerCar(Car):
 
     def move(self):
         if self.wait_time == 0:
-            self.velocity = parser.max_speed
+            self.velocity = MAX_SPEED
             self.angle -= self.get_angle()
             self.update()  # update object coords
         else:
@@ -358,6 +329,7 @@ class PopulationCar(Car):
     def __init__(self, track):
         super().__init__(track)
         self.fitness = 0
+        self.direction = 0
         self.chromosome = [
             self.random_gene(),
             self.random_gene(),
@@ -384,7 +356,12 @@ class PopulationCar(Car):
         """draw PopulationCar on screen"""
         if parser.show_simulation:
             [sensor.draw() for sensor in self.sensors if show_sensor]
-            blit_rotate(WIN, self.image, (self.x, self.y), self.angle)
+            blit_rotate(
+                WIN, self.image,
+                (self.x, self.y),
+                self.angle,
+                self.velocity == 0
+            )
 
     def move(self):
         if self.velocity > 0:
@@ -397,10 +374,9 @@ class PopulationCar(Car):
         offset = (int(self.x - x), int(self.y - y))
         poi = mask.overlap(car_mask, offset)
 
-        # if PopulationCar crashed stop it
         if poi:
             if finish and poi[0] == 9:
-                self.fitness += 100  # add 100 points if car reached the finish line
+                self.fitness += 1000  # add 1000 points if car reached the finish line
             elif not finish and self.velocity > 0:
                 self.velocity = 0
                 return 1
@@ -423,7 +399,7 @@ class PopulationCar(Car):
     def mutation(self):
         """Process of randomly changing the values of a gene."""
         randomIndex = random.randint(0, len(self.chromosome) - 1)
-        randomValue = random.uniform(-1, 1)
+        randomValue = random.uniform(-0.1, 0.1)
         self.chromosome[randomIndex] += randomValue
         self.chromosome[randomIndex] = max(-1, self.chromosome[randomIndex])
         self.chromosome[randomIndex] = min(1, self.chromosome[randomIndex])
@@ -437,7 +413,7 @@ class PopulationCar(Car):
 
     def get_fitness(self):
         """Update the fitness of the car."""
-        self.fitness += 5 if self.velocity > 0 else 0
+        self.fitness += 1 if self.velocity > 0 else 0
 
     def get_angle(self):
         """Get the new angle from weights(genes) and sensors distance."""
@@ -458,6 +434,10 @@ class PopulationCar(Car):
         eq += self.chromosome[8]*sensors_data[2]**sensors_data[2]
         eq = eq/len(self.chromosome)
 
+        self.direction = 'STRAIGHT'
+        self.direction = 'LEFT' if eq < 0 else self.direction
+        self.direction = 'RIGHT' if eq > 0 else self.direction
+
         return round(eq, 2) * (self.max_steering*2)
 
     def update(self):
@@ -473,10 +453,57 @@ def update_objects(*args):
     [car.move() for car in args if car]
 
 
-def draw_window(track, *args):
+def draw_window(track, Agents, pop_size, *args):
     """update the window"""
     track.draw()
-    [car.draw() for car in args if car]
+    cars = list(args) + list(Agents.cars)
+    [sensor.draw() for sensor in Agents.cars[0].sensors]
+    [car.draw() for car in cars if car]
+
+    font = pygame.font.Font(FONT, 15)
+    text_surface = font.render(
+        f"{Agents.crashed:03}/{pop_size:03}", True, (255, 255, 255))
+    text_rect = text_surface.get_rect()
+    text_rect.center = (68, 527)
+    WIN.blit(text_surface, text_rect)
+
+    text_surface = font.render(
+        f"{Agents.cars[0].fitness}", True, (255, 255, 255))
+    text_rect = text_surface.get_rect()
+    text_rect.center = (164, 527)
+    WIN.blit(text_surface, text_rect)
+
+    text_surface = font.render(
+        f'{Agents.cars[0].direction}', True, (255, 255, 255))
+    text_rect = text_surface.get_rect()
+    text_rect.center = (555, 527)
+    WIN.blit(text_surface, text_rect)
+
+    text_surface = font.render(
+        f"{Agents.cars[0].velocity} px/fr", True, (255, 255, 255))
+    text_rect = text_surface.get_rect()
+    text_rect.center = (651, 527)
+    WIN.blit(text_surface, text_rect)
+
+    font = pygame.font.Font(FONT, 21)
+    text = [str(x) for x in Agents.cars[0].chromosome]
+    text_surface = font.render(
+        '    '.join(text), True, (255, 255, 255))
+    text_rect = text_surface.get_rect()
+    text_rect.center = (356, 409)
+    WIN.blit(text_surface, text_rect)
+
+    text_surface = font.render(
+        f"{Agents.track.track_id+1}", True, (255, 255, 255))
+    text_rect = text_surface.get_rect()
+    text_rect.center = (458, 483)
+    WIN.blit(text_surface, text_rect)
+
+    text_surface = font.render(
+        f"{Agents.generation}", True, (255, 255, 255))
+    text_rect = text_surface.get_rect()
+    text_rect.center = (458, 523)
+    WIN.blit(text_surface, text_rect)
 
 
 def check_collisions(*args):
@@ -485,15 +512,16 @@ def check_collisions(*args):
     crashed = 0
     if len(args) > 1:
         for car in args[1:]:
-            if args[0].cleaner_line:
-                x, y = args[0].cleaner_line[:2]
-                cl_mask = pygame.mask.from_surface(
-                    pygame.Surface(
-                        (args[0].cleaner_line[2],
-                         args[0].cleaner_line[3])
+            if args[0]:
+                if args[0].cleaner_line:
+                    x, y = args[0].cleaner_line[:2]
+                    cl_mask = pygame.mask.from_surface(
+                        pygame.Surface(
+                            (args[0].cleaner_line[2],
+                             args[0].cleaner_line[3])
+                        )
                     )
-                )
-                crashed += car.collide(cl_mask, x=x, y=y, crash=True)
+                    crashed += car.collide(cl_mask, x=x, y=y, crash=True)
             car.collide(FL_MASK, *FL_POS, finish=True)
 
     crashed += sum([car.collide(car.track.border_mask) for car in args if car])
@@ -517,19 +545,27 @@ def parse_args() -> Namespace:
         description="Genetic algorithm self-driving car simulation")
 
     parser.add_argument(
-        '-t --track',
+        '-t', '--track',
         dest='track',
         type=int,
-        default=2,
+        default=None,
         help=f"Racing track to use. Default: None = Random track",
     )
 
     parser.add_argument(
-        '-user-test',
+        '--user-test',
         action="store_true",
         dest='user_test',
         default=False,
         help="Spawn car controlled by user on the track",
+    )
+
+    parser.add_argument(
+        '--agent-test',
+        action="store_true",
+        dest='agent_test',
+        default=False,
+        help="Spawn only the best car trained so far.",
     )
 
     parser.add_argument(
@@ -556,33 +592,10 @@ def parse_args() -> Namespace:
     )
 
     parser.add_argument(
-        "-t", "--max-time",
-        type=int,
-        default=60,
-        help=f"Max time for each generation to evolve (default: 60 seconds)",
-    )
-
-    parser.add_argument(
         "-fps",
         type=int,
-        default=60,
+        default=30,
         help=f"Frames per second (default: 30)",
-    )
-
-    parser.add_argument(
-        "--max-speed",
-        type=int,
-        dest="max_speed",
-        default=5,
-        help=f"Max speed of the car (default: 5 px/frame)",
-    )
-
-    parser.add_argument(
-        "--max-rotation",
-        type=int,
-        dest="max_steering",
-        default=90,
-        help=f"Max rotation for the car to aim at (default: 90 degrees)",
     )
 
     args = parser.parse_args()
@@ -595,13 +608,17 @@ def main() -> None:
 
     # make sure user selected a even number of cars
     pop_size = parser.population // 2 * 2
+    pop_size = 1 if parser.agent_test else pop_size
 
     track = Track(parser.track)
     PIDCar = CleanerCar(track)
     myCar = PlayerCar(track)
-    Agents = Population(pop_size, track.track_id)
+    Agents = Population(pop_size, track)
 
-    pygame.init()
+    if parser.agent_test:
+        PIDCar = None
+        Agents.cars[0].chromosome = BEST_CAR_CHROMOSOME[track.track_id]
+
     clock = pygame.time.Clock()
     while True:
         clock.tick(parser.fps)
@@ -613,21 +630,28 @@ def main() -> None:
 
         update_objects(myCar, PIDCar, *(Agents.cars))
         Agents.crashed += check_collisions(PIDCar, *(Agents.cars))
-        draw_window(track, myCar, PIDCar, *(Agents.cars))
+        draw_window(track, Agents, pop_size, myCar, PIDCar)
         pygame.display.update()
 
-        # keep printing in the same line refresehing the screen
-        log = f'Gen: {Agents.generation:03} ' + \
-            f'Crashed: {Agents.crashed:03}/{pop_size:03} ' + \
-            f'Track: {Agents.track.track_id+1} ' + \
-            f'Best Chromosome: {Agents.cars[0].chromosome} ' + \
-            f'Fitness: {Agents.cars[0].fitness} ' + ' '*5
-        print(log, end='\r')
+        if not parser.agent_test:
+            # keep printing in the same line refresehing the screen
+            log = f'Gen: {Agents.generation:03} ' + \
+                f'Crashed: {Agents.crashed:03}/{pop_size:03} ' + \
+                f'Track: {Agents.track.track_id+1} ' + \
+                f'Best Chromosome: {Agents.cars[0].chromosome} ' + \
+                f'Fitness: {Agents.cars[0].fitness} ' + ' '*5
+            print(log, end='\r')
 
-        Agents.cars.sort(key=lambda x: x.fitness, reverse=True)
-        restart(log, Agents, myCar, PIDCar) if Agents.crashed == pop_size else None
+            Agents.cars.sort(key=lambda x: x.fitness, reverse=True)
+            if Agents.crashed == pop_size or Agents.cars[0].fitness >= MAX_FITNESS:
+                restart(log, Agents, myCar, PIDCar)
 
 
 if __name__ == '__main__':
+
+    # get console arguments from user
     parser = parse_args()
-    main()
+    if parser.track is not None:
+        parser.track -= 1
+
+    main()  # run main function
