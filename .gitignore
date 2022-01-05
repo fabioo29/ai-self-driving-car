@@ -1,3 +1,7 @@
+# Other files
+gif/
+gif_*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
