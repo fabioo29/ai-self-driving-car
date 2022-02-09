@@ -33,7 +33,7 @@
 
 <div style="text-align: justify">
   
-**Motivation**: A typical search algorithm for complex environments is the use of Evolutionary Algorithms. The goal for this challenge is to create a game-like scenario (you can use Unity or any other GUI tool where you can control images and collisions) with a sinuous road. The evolutionary algorithm will control a car that needs to steer in the road, accordingly with its sensors. The agent might rotate left or right, by an amount of x degrees. This value is computed accordingly with the distance of the obstacles for each whisker (sensors), and a weight. The chromosome is comprised of the weights that need to be applied to each input, in order to compute the optimum rotation. Note that the function might not be linear. If you consider a, b and c to be the distances of the different whiskers, you may define a function like (**see image below**). You may attempt higher order polynomials. The fitness function is the maximum amount of time (or distance) that agent lives. **Do not use a neural network**
+**Motivation**: Academic project for Fundamentals of Artificial Intelligence, M2AI.
 
 <p align="center">
   <img src="./images/ga_function.png" />
